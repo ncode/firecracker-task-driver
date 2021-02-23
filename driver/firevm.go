@@ -24,9 +24,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/containerd/console"
@@ -171,7 +173,7 @@ func (d *Driver) initializeContainer(ctx context.Context, cfg *drivers.TaskConfi
 	cmd := firecracker.VMCommandBuilder{}.
 		WithBin(firecrackerBinary).
 		WithSocketPath(fcCfg.SocketPath).
-		WithStdin(tty).
+		WithStdin(nil).
 		WithStdout(tty).
 		WithStderr(nil).
 		Build(ctx)
@@ -216,7 +218,29 @@ func (d *Driver) initializeContainer(ctx context.Context, cfg *drivers.TaskConfi
 		return nil, fmt.Errorf("Failed creating info file=%s err=%v", logfile, err)
 	}
 	defer log.Close()
-	fmt.Fprintf(log,"%s",f)
+	fmt.Fprintf(log, "%s", f)
+
+	go func() {
+		tty, err := os.OpenFile(ftty, os.O_RDONLY|syscall.O_NOCTTY, 0)
+		if err != nil {
+			d.logger.Error("Unable to open tty %s to redirect firecracker output", ftty)
+		}
+
+		stdoutPath, err := os.OpenFile(cfg.StdoutPath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			d.logger.Error("Unable to open logfile %s to redirect firecracker output", cfg.StdoutPath)
+		}
+		defer stdoutPath.Close()
+		fmt.Fprintf(log, "%s", f)
+
+		for {
+			_, err := io.Copy(stdoutPath, tty)
+			if err != io.EOF {
+				d.logger.Error("Error reading tty %s: %s", ftty, err.Error())
+				return
+			}
+		}
+	}()
 
 	return &vminfo{Machine: m, tty: ftty, Info: info}, nil
 }
