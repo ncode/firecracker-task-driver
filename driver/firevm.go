@@ -175,7 +175,7 @@ func (d *Driver) initializeContainer(ctx context.Context, cfg *drivers.TaskConfi
 		WithSocketPath(fcCfg.SocketPath).
 		WithStdin(nil).
 		WithStdout(tty).
-		WithStderr(nil).
+		WithStderr(tty).
 		Build(ctx)
 
 	machineOpts = append(machineOpts, firecracker.WithProcessRunner(cmd))
