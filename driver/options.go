@@ -141,7 +141,6 @@ func (opts *options) getFirecrackerConfig(taskLocalDir string) (firecracker.Conf
 			HtEnabled:   firecracker.Bool(htEnabled),
 			MemSizeMib:  firecracker.Int64(opts.FcMemSz),
 		},
-		Debug: opts.Debug,
 	}, nil
 }
 

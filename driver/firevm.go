@@ -228,9 +228,6 @@ func (d *Driver) initializeContainer(ctx context.Context, cfg *drivers.TaskConfi
 		logger.SetLevel(log.DebugLevel)
 	}
 
-	vmmCtx, vmmCancel := context.WithCancel(ctx)
-	defer vmmCancel()
-
 	machineOpts := []firecracker.Opt{
 		firecracker.WithLogger(log.NewEntry(logger)),
 	}
@@ -280,17 +277,17 @@ func (d *Driver) initializeContainer(ctx context.Context, cfg *drivers.TaskConfi
 
 	machineOpts = append(machineOpts, firecracker.WithProcessRunner(cmd))
 
-	m, err := firecracker.NewMachine(vmmCtx, fcCfg, machineOpts...)
+	m, err := firecracker.NewMachine(ctx, fcCfg, machineOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("Failed creating machine: %v", err)
 	}
 
-	if err := m.Start(vmmCtx); err != nil {
+	if err := m.Start(ctx); err != nil {
 		return nil, fmt.Errorf("Failed to start machine: %v", err)
 	}
 
 	if opts.validMetadata != nil {
-		m.SetMetadata(vmmCtx, opts.validMetadata)
+		m.SetMetadata(ctx, opts.validMetadata)
 	}
 
 	pid, errpid := m.PID()
