@@ -1,26 +1,22 @@
 /* Firecracker-task-driver is a task driver for Hashicorp's nomad that allows
  * to create microvms using AWS Firecracker vmm
  * Copyright (C) 2019  Carlos Neira cneirabustos@gmail.com
- * 
+ *
  * This file is part of Firecracker-task-driver.
- * 
+ *
  * Foobar is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * Firecracker-task-driver is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with Firecracker-task-driver. If not, see <http://www.gnu.org/licenses/>.
  */
-
-
-
-
 
 package firevm
 
@@ -88,7 +84,7 @@ type options struct {
 }
 
 // Converts options to a usable firecracker config
-func (opts *options) getFirecrackerConfig() (firecracker.Config, error) {
+func (opts *options) getFirecrackerConfig(taskLocalDir string) (firecracker.Config, error) {
 	// validate metadata json
 	if opts.FcMetadata != "" {
 		if err := json.Unmarshal([]byte(opts.FcMetadata), &opts.validMetadata); err != nil {
@@ -123,7 +119,7 @@ func (opts *options) getFirecrackerConfig() (firecracker.Config, error) {
 	if opts.FcSocketPath != "" {
 		socketPath = opts.FcSocketPath
 	} else {
-		socketPath = getSocketPath()
+		socketPath = fmt.Sprintf("%s/firecracker.sock", taskLocalDir)
 	}
 
 	htEnabled := !opts.FcDisableHt
@@ -356,29 +352,6 @@ func parseVsocks(devices []string) ([]firecracker.VsockDevice, error) {
 
 func createFifoFileLogs(fifoPath string) (*os.File, error) {
 	return os.OpenFile(fifoPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-}
-
-// getSocketPath provides a randomized socket path by building a unique fielname
-// and searching for the existance of directories {$HOME, os.TempDir()} and returning
-// the path with the first directory joined with the unique filename. If we can't
-// find a good path panics.
-func getSocketPath() string {
-	filename := strings.Join([]string{
-		".firecracker.sock",
-		strconv.Itoa(os.Getpid()),
-		strconv.Itoa(rand.Intn(1000))},
-		"-",
-	)
-	var dir string
-	if d := os.Getenv("HOME"); checkExistsAndDir(d) {
-		dir = d
-	} else if checkExistsAndDir(os.TempDir()) {
-		dir = os.TempDir()
-	} else {
-		panic("Unable to find a location for firecracker socket. 'It's not going to do any good to land on mars if we're stupid.' --Ray Bradbury")
-	}
-
-	return filepath.Join(dir, filename)
 }
 
 // checkExistsAndDir returns true if path exists and is a Dir

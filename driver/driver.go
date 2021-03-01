@@ -225,7 +225,7 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 	attrs := map[string]*pstructs.Attribute{"driver.firecracker-task": pstructs.NewStringAttribute("1")}
 	health = drivers.HealthStateHealthy
 	desc = "ready"
-	d.logger.Info("buildFingerprint()", "driver.FingerPrint", hclog.Fmt("%+v", health))
+	d.logger.Debug("buildFingerprint()", "driver.FingerPrint", hclog.Fmt("%+v", health))
 	return &drivers.Fingerprint{
 		Attributes:        attrs,
 		Health:            health,
@@ -252,7 +252,7 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
-	m, err := d.initializeContainer(context.Background(), handle.Config, driverConfig)
+	m, err := d.recoverContainer(context.Background(), handle.Config, driverConfig)
 	if err != nil {
 		d.logger.Info("Error RecoverTask k", "driver_cfg", hclog.Fmt("%+v", err))
 		return fmt.Errorf("task with ID %q failed", handle.Config.ID)
