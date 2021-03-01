@@ -24,11 +24,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
+	"github.com/containerd/console"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/client/lib/fifo"
@@ -104,16 +107,20 @@ func taskConfig2FirecrackerOpts(taskConfig TaskConfig, cfg *drivers.TaskConfig) 
 }
 
 type vminfo struct {
-	Machine    *firecracker.Machine
-	SocketPath string
-	Info       Instance_info
+	Machine      *firecracker.Machine
+	SocketPath   string
+	StdOutSerial string
+	StdInSerial  string
+	Info         Instance_info
 }
 
 type Instance_info struct {
-	AllocId    string
-	Ip         string
-	SocketPath string
-	Pid        string
+	AllocId      string
+	Ip           string
+	SocketPath   string
+	StdOutSerial string
+	StdInSerial  string
+	Pid          string
 }
 
 func (d *Driver) initializeContainer(ctx context.Context, cfg *drivers.TaskConfig, taskConfig TaskConfig) (*vminfo, error) {
@@ -153,33 +160,33 @@ func (d *Driver) initializeContainer(ctx context.Context, cfg *drivers.TaskConfi
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("Binary %q does not exist: %v", firecrackerBinary, err)
 	}
-
 	if err != nil {
 		return nil, fmt.Errorf("Failed to stat binary, %q: %v", firecrackerBinary, err)
 	}
-
 	if finfo.IsDir() {
 		return nil, fmt.Errorf("Binary, %q, is a directory", firecrackerBinary)
 	} else if finfo.Mode()&executableMask == 0 {
 		return nil, fmt.Errorf("Binary, %q, is not executable. Check permissions of binary", firecrackerBinary)
 	}
 
-	stdoutFifo, err := fifo.OpenWriter(cfg.StdoutPath)
+	otty, ottyName, err := console.NewPty()
 	if err != nil {
-		d.logger.Error("Unable to open logfile %s to redirect firecracker stdout", cfg.StdoutPath)
+		return nil, fmt.Errorf("Could not create serial console  %v+", err)
 	}
 
-	stderrFifo, err := fifo.OpenWriter(cfg.StderrPath)
+	etty, ettyName, err := console.NewPty()
 	if err != nil {
-		d.logger.Error("Unable to open logfile %s to redirect firecracker stderr", cfg.StderrPath)
+		return nil, fmt.Errorf("Could not create serial console  %v+", err)
 	}
+
+	go d.logging(ctx, cfg.StdoutPath, cfg.StderrPath, ottyName, ettyName)
 
 	cmd := firecracker.VMCommandBuilder{}.
 		WithBin(firecrackerBinary).
 		WithSocketPath(fcCfg.SocketPath).
 		WithStdin(nil).
-		WithStdout(stdoutFifo).
-		WithStderr(stderrFifo).
+		WithStdout(otty).
+		WithStderr(etty).
 		Build(ctx)
 
 	machineOpts = append(machineOpts, firecracker.WithProcessRunner(cmd))
@@ -228,4 +235,44 @@ func (d *Driver) initializeContainer(ctx context.Context, cfg *drivers.TaskConfi
 	fmt.Fprintf(log, "%s", f)
 
 	return &vminfo{Machine: m, SocketPath: m.Cfg.SocketPath, Info: info}, nil
+}
+
+func (d *Driver) logging(ctx context.Context, stdoutPath string, stderrPath string, ottyName string, ettyName string) error {
+	ottyFile, err := os.OpenFile(ottyName, os.O_RDONLY|syscall.O_NOCTTY, 0)
+	if err != nil {
+		d.logger.Error("Unable to open tty %s to redirect firecracker stdout: %s", ottyName, err.Error())
+		return err
+	}
+	defer ottyFile.Close()
+
+	stdoutFifo, err := fifo.OpenWriter(stdoutPath)
+	if err != nil {
+		d.logger.Error("Unable to open logfile %s to redirect firecracker stdout: %s", stdoutPath, err.Error())
+		return err
+	}
+	defer stdoutFifo.Close()
+
+	ettyFile, err := os.OpenFile(ettyName, os.O_RDONLY|syscall.O_NOCTTY, 0)
+	if err != nil {
+		d.logger.Error("Unable to open tty %s to redirect firecracker stderr: %s", ettyFile, err.Error())
+		return err
+	}
+	defer ettyFile.Close()
+
+	stderrFifo, err := fifo.OpenWriter(stderrPath)
+	if err != nil {
+		d.logger.Error("Unable to open logfile %s to redirect firecracker stderr: %s", stderrPath, err.Error())
+		return err
+	}
+	defer stderrFifo.Close()
+
+	go io.Copy(stdoutFifo, ottyFile)
+	go io.Copy(stderrFifo, ettyFile)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }

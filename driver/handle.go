@@ -131,6 +131,7 @@ func (h *taskHandle) run() {
 	h.completedAt = time.Now()
 }
 
+// stats collection inspired on https://github.com/hashicorp/nomad/blob/7ae12736b5c7a618428b1b364878b5e7bb16a7f2/drivers/shared/executor/pid_collector.go#L134
 func (h *taskHandle) stats(ctx context.Context, statsChannel chan *drivers.TaskResourceUsage, interval time.Duration) {
 	defer close(statsChannel)
 	timer := time.NewTimer(0)
@@ -146,7 +147,6 @@ func (h *taskHandle) stats(ctx context.Context, statsChannel chan *drivers.TaskR
 
 		h.stateLock.Lock()
 		t := time.Now()
-
 		pid, err := strconv.Atoi(h.Info.Pid)
 		if err != nil {
 			h.logger.Error("unable to convert pid ", h.Info.Pid, " to int from ", h.taskConfig.ID)
@@ -169,23 +169,28 @@ func (h *taskHandle) stats(ctx context.Context, statsChannel chan *drivers.TaskR
 		if cpuStats, err := p.Times(); err == nil {
 			cs.SystemMode = h.cpuStatsSys.Percent(cpuStats.System * float64(time.Second))
 			cs.UserMode = h.cpuStatsUser.Percent(cpuStats.User * float64(time.Second))
-			cs.Measured = firecrackerCPUStats
-
 			// calculate cpu usage percent
 			cs.Percent = h.cpuStatsTotal.Percent(cpuStats.Total() * float64(time.Second))
+			cs.Measured = firecrackerCPUStats
 		}
 		h.stateLock.Unlock()
 
+		ru := &drivers.ResourceUsage{
+			CpuStats:    cs,
+			MemoryStats: ms,
+		}
+
+		pids := make(map[string]*drivers.ResourceUsage)
+		pids[h.Info.Pid] = ru
+
 		// update uasge
-		usage := drivers.TaskResourceUsage{
-			ResourceUsage: &drivers.ResourceUsage{
-				CpuStats:    cs,
-				MemoryStats: ms,
-			},
-			Timestamp: t.UTC().UnixNano(),
+		usage := &drivers.TaskResourceUsage{
+			ResourceUsage: ru,
+			Timestamp:     t.UTC().UnixNano(),
+			Pids:          pids,
 		}
 		// send stats to nomad
-		statsChannel <- &usage
+		statsChannel <- usage
 	}
 }
 
